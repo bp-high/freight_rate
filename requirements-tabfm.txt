@@ -1,0 +1,4 @@
+# Optional: tabular foundation model experiments (src/tabfm_experiment.py).
+# Not needed for the main pipeline (src/validate.py, src/train_predict.py).
+tabpfn>=8,<9
+tabicl>=2.1,<3

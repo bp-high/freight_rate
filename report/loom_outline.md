@@ -27,6 +27,10 @@ chart.
   market nonlinearities — exactly what boosted trees capture with little
   tuning; trained on log(rate) so errors are multiplicative.
 - Halves the error of a rate-per-mile lookup baseline ($58 vs $135 MAE).
+- Also benchmarked tabular foundation models (TabPFN v2 as a bagged
+  in-context ensemble; TabICL v2 where its HuggingFace-hosted weights are
+  reachable) on the same temporal holdout — see report/tabfm_metrics.json
+  and the report's model-comparison section for the outcome.
 
 ## 4. Training and validation split (~40s)
 - Primary split is temporal: train Jan–Aug, hold out Sep–Oct — mirrors
