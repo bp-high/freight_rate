@@ -68,8 +68,13 @@ def try_tabicl(train_f: pd.DataFrame, x_eval: pd.DataFrame, y_eval, clean_mask) 
         model = TabICLRegressor(
             device="cpu", n_estimators=2, random_state=SEED, model_path=model_path
         )
+        # Cap the in-context training set so CPU inference stays tractable.
+        ctx = train_f
+        if len(ctx) > 20_000:
+            idx = np.random.default_rng(SEED).choice(len(ctx), 20_000, replace=False)
+            ctx = ctx.iloc[idx]
         t0 = time.time()
-        model.fit(tabpfn_frame(train_f), np.log(train_f["posted_rate"].to_numpy()))
+        model.fit(tabpfn_frame(ctx), np.log(ctx["posted_rate"].to_numpy()))
         pred = np.exp(model.predict(x_eval))
         return {
             "status": "ok",
@@ -107,14 +112,21 @@ def main() -> None:
     rpm = y_eval / eval_f["distance"].to_numpy()
     clean_mask = (rpm >= 0.8) & (rpm <= 6.0)
 
-    # --- LightGBM reference on the identical rows ---
-    booster = fit_lgb(train_f, stop_f)
-    lgb_log = booster.predict(eval_f[ALL_FEATURES])
+    # --- LightGBM reference on the identical rows (cached across reruns) ---
+    BAG_CACHE.mkdir(exist_ok=True)
+    lgb_cache = BAG_CACHE / f"lgb_eval_seed{SEED}.npy"
+    if lgb_cache.exists():
+        lgb_log = np.load(lgb_cache)
+        print("lightgbm reference loaded from cache", flush=True)
+    else:
+        booster = fit_lgb(train_f, stop_f)
+        lgb_log = booster.predict(eval_f[ALL_FEATURES])
+        np.save(lgb_cache, lgb_log)
+        print("lightgbm reference done", flush=True)
     lgb_pred = np.exp(lgb_log)
 
     # --- TabPFN v2: bagged context subsamples ---
     x_eval = tabpfn_frame(eval_f)
-    BAG_CACHE.mkdir(exist_ok=True)
     bag_logs = []
     for bag in range(N_BAGS):
         # Bag predictions are cached to disk so an interrupted run resumes
