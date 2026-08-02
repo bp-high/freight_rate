@@ -1,0 +1,8 @@
+{
+  "method": "0.5 * LightGBM + 0.5 * bagged TabPFN v2 (log space)",
+  "bags": 4,
+  "bag_size": 8000,
+  "validation_mean": 2365.1267080496473,
+  "december_min": 821.4994600294943,
+  "december_max": 840.4050435774332
+}

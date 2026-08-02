@@ -27,10 +27,13 @@ chart.
   market nonlinearities — exactly what boosted trees capture with little
   tuning; trained on log(rate) so errors are multiplicative.
 - Halves the error of a rate-per-mile lookup baseline ($58 vs $135 MAE).
-- Also benchmarked tabular foundation models (TabPFN v2 as a bagged
-  in-context ensemble; TabICL v2 where its HuggingFace-hosted weights are
-  reachable) on the same temporal holdout — see report/tabfm_metrics.json
-  and the report's model-comparison section for the outcome.
+- Also benchmarked tabular foundation models on the same temporal holdout
+  (report/tabfm_metrics.json): bagged TabPFN v2 nearly matches LightGBM
+  ($65.27 vs $63.23 MAE on identical rows), and a 50/50 log-space blend
+  beats both at $58.75 (−7.1% vs LightGBM) — the shipped predictions use
+  the blend. TabICL v2 couldn't run in the build environment (gated weight
+  hosting); the experiment script picks it up automatically where its
+  weights are reachable.
 
 ## 4. Training and validation split (~40s)
 - Primary split is temporal: train Jan–Aug, hold out Sep–Oct — mirrors
