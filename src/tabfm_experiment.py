@@ -46,6 +46,8 @@ N_BAGS = 4             # TabPFN context subsamples
 BAG_SIZE = 8000        # rows per TabPFN context
 N_ESTIMATORS = 2       # TabPFN internal ensemble size per bag
 MODEL_PATH = os.path.expanduser("~/.cache/tabpfn/tabpfn-v2-regressor.ckpt")
+TABICL_MODEL_PATH = os.path.expanduser("~/.cache/tabicl/tabicl-regressor-v2-20260212.ckpt")
+BAG_CACHE = Path(__file__).resolve().parents[1] / ".tabfm_cache"
 
 
 def tabpfn_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -62,7 +64,10 @@ def try_tabicl(train_f: pd.DataFrame, x_eval: pd.DataFrame, y_eval, clean_mask) 
     try:
         from tabicl import TabICLRegressor
 
-        model = TabICLRegressor(device="cpu", n_estimators=2, random_state=SEED)
+        model_path = TABICL_MODEL_PATH if os.path.exists(TABICL_MODEL_PATH) else None
+        model = TabICLRegressor(
+            device="cpu", n_estimators=2, random_state=SEED, model_path=model_path
+        )
         t0 = time.time()
         model.fit(tabpfn_frame(train_f), np.log(train_f["posted_rate"].to_numpy()))
         pred = np.exp(model.predict(x_eval))
@@ -109,8 +114,16 @@ def main() -> None:
 
     # --- TabPFN v2: bagged context subsamples ---
     x_eval = tabpfn_frame(eval_f)
+    BAG_CACHE.mkdir(exist_ok=True)
     bag_logs = []
     for bag in range(N_BAGS):
+        # Bag predictions are cached to disk so an interrupted run resumes
+        # instead of recomputing finished bags (deterministic per seed).
+        cache_file = BAG_CACHE / f"tabpfn_bag{bag}_seed{SEED}.npy"
+        if cache_file.exists():
+            bag_logs.append(np.load(cache_file))
+            print(f"bag {bag + 1}/{N_BAGS} loaded from cache", flush=True)
+            continue
         bag_rng = np.random.default_rng(SEED + bag)
         idx = bag_rng.choice(len(train_f), BAG_SIZE, replace=False)
         ctx = train_f.iloc[idx]
@@ -123,7 +136,9 @@ def main() -> None:
         )
         t0 = time.time()
         model.fit(tabpfn_frame(ctx), np.log(ctx["posted_rate"].to_numpy()))
-        bag_logs.append(model.predict(x_eval))
+        log_pred = model.predict(x_eval)
+        np.save(cache_file, log_pred)
+        bag_logs.append(log_pred)
         print(f"bag {bag + 1}/{N_BAGS} done in {time.time() - t0:.0f}s", flush=True)
     tab_log = np.mean(bag_logs, axis=0)
     tab_pred = np.exp(tab_log)
