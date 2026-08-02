@@ -57,11 +57,25 @@ def tabpfn_frame(df: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
-def try_tabicl(train_f: pd.DataFrame, x_eval: pd.DataFrame, y_eval, clean_mask) -> dict:
+def try_tabicl(train_f: pd.DataFrame, x_eval: pd.DataFrame, y_eval, clean_mask):
     """Evaluate TabICL v2 if its checkpoint is available; report why not
     otherwise. TabICL is built for large in-context training sets, so the
-    full cleaned Jan-Aug data is passed as a single context."""
+    full cleaned Jan-Aug data is passed as a single context (capped for CPU).
+
+    Returns (report_dict, log_pred-or-None); log predictions are cached so
+    the slow CPU inference runs once and blend grids can reuse them."""
+    cache_file = BAG_CACHE / f"tabicl_eval_seed{SEED}.npy"
     try:
+        if cache_file.exists():
+            log_pred = np.load(cache_file)
+            pred = np.exp(log_pred)
+            return {
+                "status": "ok",
+                "cached": True,
+                "all_rows": metrics(y_eval, pred),
+                "clean_rows": metrics(y_eval[clean_mask], pred[clean_mask]),
+            }, log_pred
+
         from tabicl import TabICLRegressor
 
         model_path = TABICL_MODEL_PATH if os.path.exists(TABICL_MODEL_PATH) else None
@@ -75,18 +89,20 @@ def try_tabicl(train_f: pd.DataFrame, x_eval: pd.DataFrame, y_eval, clean_mask) 
             ctx = ctx.iloc[idx]
         t0 = time.time()
         model.fit(tabpfn_frame(ctx), np.log(ctx["posted_rate"].to_numpy()))
-        pred = np.exp(model.predict(x_eval))
+        log_pred = model.predict(x_eval)
+        np.save(cache_file, log_pred)
+        pred = np.exp(log_pred)
         return {
             "status": "ok",
             "seconds": round(time.time() - t0, 1),
             "all_rows": metrics(y_eval, pred),
             "clean_rows": metrics(y_eval[clean_mask], pred[clean_mask]),
-        }
+        }, log_pred
     except Exception as exc:  # noqa: BLE001 - record any failure and move on
         return {
             "status": "unavailable",
             "reason": f"{type(exc).__name__}: {str(exc)[:300]}",
-        }
+        }, None
 
 
 def main() -> None:
@@ -157,7 +173,7 @@ def main() -> None:
     tab_pred_1bag = np.exp(bag_logs[0])
 
     # --- TabICL v2 (skips gracefully when weights are unreachable) ---
-    tabicl_result = try_tabicl(train_f, x_eval, y_eval, clean_mask)
+    tabicl_result, tabicl_log = try_tabicl(train_f, x_eval, y_eval, clean_mask)
     print("tabicl:", tabicl_result.get("status"), flush=True)
 
     # --- Blend in log space ---
@@ -166,6 +182,20 @@ def main() -> None:
         pred = np.exp(w * lgb_log + (1 - w) * tab_log)
         blend_results[float(w)] = metrics(y_eval[clean_mask], pred[clean_mask])["MAE"]
     best_w = min(blend_results, key=blend_results.get)
+
+    # --- 3-way blend grid (only when TabICL ran); covers the 2-way blends
+    # and single models as boundary points of the simplex ---
+    blend3_results, best3 = {}, None
+    if tabicl_log is not None:
+        for i in range(11):
+            for j in range(11 - i):
+                k = 10 - i - j
+                pred = np.exp(
+                    (i / 10) * lgb_log + (j / 10) * tab_log + (k / 10) * tabicl_log
+                )
+                key = f"{i / 10:.1f}/{j / 10:.1f}/{k / 10:.1f}"
+                blend3_results[key] = metrics(y_eval[clean_mask], pred[clean_mask])["MAE"]
+        best3 = min(blend3_results, key=blend3_results.get)
 
     results = {
         "setup": {
@@ -194,6 +224,12 @@ def main() -> None:
             "clean_rows_mae": blend_results[best_w],
         },
     }
+    if best3 is not None:
+        results["blend3_mae_by_weights_lgb_tabpfn_tabicl"] = blend3_results
+        results["best_blend3"] = {
+            "weights_lgb_tabpfn_tabicl": best3,
+            "clean_rows_mae": blend3_results[best3],
+        }
     out = ROOT / "report" / "tabfm_metrics.json"
     out.write_text(json.dumps(results, indent=2))
     print(json.dumps(results, indent=2))
