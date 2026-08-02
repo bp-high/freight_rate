@@ -74,7 +74,7 @@ const tabfmTable = new Table({
     trow(["TabPFN v2 — single 8k context", "78.53", "3.22", "in-context, no training"], { shade: "F2F7F8" }),
     trow(["TabPFN v2 — bagged 4 × 8k contexts", "65.27", "2.58", "bagging closes most of the gap"]),
     trow(["Blend: 0.5·LGB + 0.5·TabPFN (log)", "58.75", "—", "−7.1% MAE vs LightGBM"], { bold: true, shade: "F2F7F8" }),
-    trow(["TabICL v2", "n/a", "n/a", "weights unreachable in build env"]),
+    trow(["TabICL v2 — single 20k context", "86.85", "3.36", "zero weight in 3-way blend grid"]),
   ],
 });
 
@@ -164,7 +164,7 @@ const doc = new Document({
 
         h2("5.1 Tabular foundation models (TabPFN v2, TabICL v2)"),
         p([
-          "Two recent tabular foundation models were benchmarked against LightGBM on a fixed 3,000-row subsample of the same temporal holdout (identical rows for every model; clean-row metrics). TabPFN v2 is an in-context learner capped at ~10k training rows per fit, so it was applied as a bagged ensemble of four disjoint 8,000-row contexts whose log-predictions are averaged. TabICL v2 could not be evaluated in the build environment (its checkpoints are served from gated hosting the environment cannot reach); the experiment script runs it automatically wherever the weights are reachable.",
+          "Two recent tabular foundation models were benchmarked against LightGBM on a fixed 3,000-row subsample of the same temporal holdout (identical rows for every model; clean-row metrics). TabPFN v2 is an in-context learner capped at ~10k training rows per fit, so it was applied as a bagged ensemble of four disjoint 8,000-row contexts whose log-predictions are averaged. TabICL v2 targets large in-context training sets and was given a single 20,000-row context (CPU cap); despite the larger context it trails both LightGBM and bagged TabPFN at $86.85 MAE, and an exhaustive 3-way log-space blend-weight grid over all three models puts its optimal weight at exactly zero — the best 3-way blend is the existing 0.5/0.5 LightGBM + TabPFN blend, so TabICL was not added to the shipped predictions.",
         ]),
         tabfmTable,
         p([new TextRun({ text: "TabPFN alone does not beat a tuned LightGBM here, but its errors are decorrelated enough that the simple 50/50 log-space blend wins by ~7% MAE, with a flat optimum across blend weights 0.4–0.6 (robust, not tuned to the grid). The shipped validation_predictions.csv and December chart use this blend; src/train_predict.py reproduces the LightGBM-only outputs.", size: 19, italics: true, color: GREY })], { spacing: { before: 100, after: 160 } }),

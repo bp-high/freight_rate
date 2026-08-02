@@ -31,9 +31,9 @@ chart.
   (report/tabfm_metrics.json): bagged TabPFN v2 nearly matches LightGBM
   ($65.27 vs $63.23 MAE on identical rows), and a 50/50 log-space blend
   beats both at $58.75 (−7.1% vs LightGBM) — the shipped predictions use
-  the blend. TabICL v2 couldn't run in the build environment (gated weight
-  hosting); the experiment script picks it up automatically where its
-  weights are reachable.
+  the blend. TabICL v2 (single 20k-row context) trails at $86.85, and a
+  full 3-way blend-weight grid assigns it zero weight, so it adds nothing
+  here and the shipped blend stays LightGBM + TabPFN.
 
 ## 4. Training and validation split (~40s)
 - Primary split is temporal: train Jan–Aug, hold out Sep–Oct — mirrors

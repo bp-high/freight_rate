@@ -81,7 +81,7 @@ All randomness is seeded; reruns reproduce the committed outputs.
 | TabPFN v2, single 8k context | $78.53 | 3.22% | in-context, no training |
 | TabPFN v2, bagged 4 x 8k contexts | $65.27 | 2.58% | approaches LightGBM |
 | **Blend 0.5 LGB + 0.5 TabPFN (log)** | **$58.75** | — | **-7.1% MAE vs LightGBM on same rows** |
-| TabICL v2 | n/a | n/a | weights unreachable in this environment (HF-gated hosting) |
+| TabICL v2, single 20k context | $86.85 | 3.36% | not competitive; 3-way blend grid assigns it zero weight |
 
 ## Approach in one paragraph
 
