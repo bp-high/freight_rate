@@ -73,8 +73,33 @@ const tabfmTable = new Table({
     trow(["LightGBM", "63.23", "2.50", "reference"]),
     trow(["TabPFN v2 — single 8k context", "78.53", "3.22", "in-context, no training"], { shade: "F2F7F8" }),
     trow(["TabPFN v2 — bagged 4 × 8k contexts", "65.27", "2.58", "bagging closes most of the gap"]),
-    trow(["Blend: 0.5·LGB + 0.5·TabPFN (log)", "58.75", "—", "−7.1% MAE vs LightGBM"], { bold: true, shade: "F2F7F8" }),
-    trow(["TabICL v2 — single 20k context", "86.85", "3.36", "zero weight in 3-way blend grid"]),
+    trow(["TabPFN v2 — single 38k context", "56.40", "2.24", "context size beats bagging by ~$9"], { shade: "F2F7F8" }),
+    trow(["TabICL v2 — single 20k context", "86.85", "3.36", "zero weight in every blend grid"]),
+    trow(["TabM — trained MLP ensemble", "57.90", "2.35", "beats LightGBM as a single model"], { shade: "F2F7F8" }),
+    trow(["Blend: 0.5·LGB + 0.5·TabPFN-bagged", "58.75", "—", "previously shipped 2-way blend"]),
+    trow(["Blend: 0.4/0.1/0.5 LGB/TabPFN-38k/TabM", "53.35", "—", "shipped — weights from rolling-origin"], { bold: true, shade: "F2F7F8" }),
+  ],
+});
+
+const rollColW = [3560, 1160, 1160, 1160, 1160, 1160];
+const rollTotal = rollColW.reduce((a, c) => a + c, 0);
+const rrow = (cells, opts = {}) =>
+  new TableRow({
+    children: cells.map((c, i) =>
+      cell(c, { w: rollColW[i], align: i === 0 ? AlignmentType.LEFT : AlignmentType.RIGHT, ...opts })
+    ),
+  });
+const rollingTable = new Table({
+  width: { size: rollTotal, type: WidthType.DXA },
+  columnWidths: rollColW,
+  rows: [
+    rrow(["Candidate (clean-row MAE $)", "Jul", "Aug", "Sep", "Oct", "Mean"], { bold: true, shade: "E3EDEF" }),
+    rrow(["LightGBM only", "66.67", "70.81", "57.99", "53.13", "62.15"]),
+    rrow(["TabPFN v2 single-context only", "47.75", "129.91", "40.49", "74.43", "73.15"], { shade: "F2F7F8" }),
+    rrow(["TabM only", "63.57", "45.19", "53.02", "67.51", "57.32"]),
+    rrow(["Previous blend (0.5 LGB + 0.5 bagged)", "64.73", "95.47", "52.10", "47.64", "64.98"], { shade: "F2F7F8" }),
+    rrow(["Sep–Oct holdout optimum 0.1/0.5/0.4", "—", "—", "—", "—", "56.64"]),
+    rrow(["Shipped 0.4/0.1/0.5", "—", "—", "—", "—", "51.74"], { bold: true, shade: "F2F7F8" }),
   ],
 });
 
@@ -127,9 +152,9 @@ const doc = new Document({
           b("log(posted_rate)"),
           " with a LightGBM gradient-boosted tree model, which on a strictly forward-in-time holdout (train Jan–Aug, predict Sep–Oct) reaches ",
           b("MAE $58 / MAPE 2.5% / R² 0.967"),
-          " on clean rows — less than half the error of a rate-per-mile lookup baseline ($135 MAE). A tabular-foundation-model comparison on the same holdout showed a ",
-          b("50/50 log-space blend of LightGBM and a bagged TabPFN v2 ensemble cuts MAE a further 7%"),
-          ", so the shipped predictions use that blend, retrained/re-contexted on all ten labeled months, for every load in validation.csv plus the fixed Lexington → Fort Wayne December lane.",
+          " on clean rows — less than half the error of a rate-per-mile lookup baseline ($135 MAE). A model comparison on the same holdout, re-validated rolling-origin across four forward-in-time folds, selected a ",
+          b("log-space blend of LightGBM (0.4), single-full-context TabPFN v2 (0.1), and a TabM neural ensemble (0.5)"),
+          " — mean clean-row MAE $51.74 across folds vs $64.98 for a LightGBM+TabPFN 50/50 blend and $62.15 for LightGBM alone. The shipped predictions use that blend, retrained/re-contexted on all ten labeled months, for every load in validation.csv plus the fixed Lexington → Fort Wayne December lane.",
         ]),
 
         h1("2. Data exploration — key findings"),
@@ -162,12 +187,21 @@ const doc = new Document({
           "Feature importance confirms the EDA story: distance features carry most of the gain, followed by equipment, quote_signal, weight, and the market/seasonality block. A linear model was rejected because the distance taper, equipment × distance interactions, and market nonlinearities are exactly what trees capture cheaply.",
         ]),
 
-        h2("5.1 Tabular foundation models (TabPFN v2, TabICL v2)"),
+        h2("5.1 Beyond LightGBM: foundation models and a trained neural ensemble"),
         p([
-          "Two recent tabular foundation models were benchmarked against LightGBM on a fixed 3,000-row subsample of the same temporal holdout (identical rows for every model; clean-row metrics). TabPFN v2 is an in-context learner capped at ~10k training rows per fit, so it was applied as a bagged ensemble of four disjoint 8,000-row contexts whose log-predictions are averaged. TabICL v2 targets large in-context training sets and was given a single 20,000-row context (CPU cap); despite the larger context it trails both LightGBM and bagged TabPFN at $86.85 MAE, and an exhaustive 3-way log-space blend-weight grid over all three models puts its optimal weight at exactly zero — the best 3-way blend is the existing 0.5/0.5 LightGBM + TabPFN blend, so TabICL was not added to the shipped predictions.",
+          "Four model families were benchmarked against LightGBM on a fixed 3,000-row subsample of the same temporal holdout (identical rows for every model; clean-row metrics). TabPFN v2 is a pretrained in-context transformer: with the whole 38k-row training window as a single context it reaches $56.40 MAE, ~$9 better than a bagged ensemble of four 8,000-row contexts — for this in-context learner, context size matters more than bagging. TabICL v2 (single 20,000-row context, CPU cap) is not competitive at $86.85 and takes zero weight in every blend grid. TabM (a parameter-efficient ensemble of weight-sharing MLPs, trained from scratch on the same features and early-stopped on the same frame as LightGBM) is the best single model at $57.90 and contributes a genuinely third error profile: trees, in-context transformer, trained MLPs.",
         ]),
         tabfmTable,
-        p([new TextRun({ text: "TabPFN alone does not beat a tuned LightGBM here, but its errors are decorrelated enough that the simple 50/50 log-space blend wins by ~7% MAE, with a flat optimum across blend weights 0.4–0.6 (robust, not tuned to the grid). The shipped validation_predictions.csv and December chart use this blend; src/train_predict.py reproduces the LightGBM-only outputs.", size: 19, italics: true, color: GREY })], { spacing: { before: 100, after: 160 } }),
+        p([new TextRun({ text: "Newer TabPFN checkpoints (v2.5/v3) are gated behind Prior Labs' non-commercial license and a one-time acceptance token; the experiment script benchmarks them automatically when TABPFN_TOKEN is set, and the shipped blend deliberately uses only the license-free v2 weights.", size: 19, italics: true, color: GREY })], { spacing: { before: 100, after: 160 } }),
+
+        h2("5.2 Rolling-origin selection of the blend weights"),
+        p([
+          "The Sep–Oct holdout alone would pick blend weights 0.1/0.5/0.4 (LGB/TabPFN/TabM, $50.97 on that window). But weights tuned on one window can overfit its regime, so every weight vector on the 3-model simplex was re-scored across four forward-in-time folds: predict Jul, Aug, Sep, Oct using only strictly earlier months (LightGBM early-stops on the last training month and refits; TabPFN gets the whole window as context; TabM early-stops on the last training month). The folds disagree violently — single-context TabPFN is the best model in Jul/Sep and the worst in Aug/Oct — so the shipped weights minimize the MEAN clean-row MAE across folds: ",
+          b("0.4·LightGBM + 0.1·TabPFN + 0.5·TabM, mean $51.74"),
+          ", on a flat plateau (LGB 0.3–0.5, TabPFN 0.0–0.2, TabM 0.4–0.6 all within ~$1). The holdout-only optimum drops to $56.64 under the same test.",
+        ]),
+        rollingTable,
+        p([new TextRun({ text: "Per-fold numbers in report/rolling_validation.json (src/rolling_validate.py). The month-to-month regime swings are also the honest uncertainty statement about Nov–Dec: the blend hedges across three model families precisely because no single one wins every future month.", size: 19, italics: true, color: GREY })], { spacing: { before: 100, after: 160 } }),
 
         h1("6. Fixed December lane prediction"),
         p([
@@ -175,7 +209,7 @@ const doc = new Document({
           b("market_index is imputed from the per-date mean of those loads"),
           " (legitimate: features only, no labels involved), and the per-date market aggregates are computed the same way. ",
           b("quote_signal uses the lane’s Dry Van average (2.02)"),
-          " from 21 historical Lexington → Fort Wayne loads, with day-to-day quote variation entering through the pooled daily aggregate. The blended predictions land at $821–$840 — inside the lane’s historical $758–$973 range — and reproduce the weekly market cycle (midweek peaks, weekend troughs).",
+          " from 21 historical Lexington → Fort Wayne loads, with day-to-day quote variation entering through the pooled daily aggregate. The blended predictions land at $851–$882 — inside the lane’s historical $758–$974 range and close to its $857 mean — and reproduce the weekly market cycle (midweek peaks Wed–Thu, weekend troughs).",
         ]),
         new Paragraph({
           spacing: { before: 120, after: 60 },
@@ -197,7 +231,7 @@ const doc = new Document({
         h1("7. Reproducibility"),
         p([
           "GitHub repository: ", b("bp-high/freight_rate"), ". ",
-          "python -m pip install -r requirements.txt (plus requirements-tabfm.txt for the foundation models), then: python src/validate.py (validation experiments), python src/tabfm_experiment.py (foundation-model comparison), python src/final_blend_predict.py (shipped blend predictions; src/train_predict.py for the LightGBM-only variant), and python score.py --predictions validation_predictions.csv --december-predictions data/december_chart_inputs.csv. All randomness is seeded, and the slow TabPFN steps checkpoint their progress and resume if interrupted.",
+          "python -m pip install -r requirements.txt (plus requirements-tabfm.txt for the foundation models and TabM), then: python src/validate.py (validation experiments), python src/tabfm_experiment.py (model comparison), python src/rolling_validate.py (rolling-origin blend-weight selection), python src/final_blend_predict.py (shipped blend predictions; src/train_predict.py for the LightGBM-only variant), and python score.py --predictions validation_predictions.csv --december-predictions data/december_chart_inputs.csv. All randomness is seeded, and the slow TabPFN/TabM steps checkpoint their progress and resume if interrupted.",
         ]),
       ],
     },

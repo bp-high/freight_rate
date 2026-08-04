@@ -1,0 +1,83 @@
+{
+  "setup": {
+    "eval_months": [
+      7,
+      8,
+      9,
+      10
+    ],
+    "eval_rows_per_fold": 1500,
+    "models": "LightGBM / TabPFN v2 (bagged 4x8k and single full context) / TabM",
+    "weights_order": "lgb/tabpfn/tabm",
+    "selection": "mean clean-row MAE across folds on the single-context simplex"
+  },
+  "folds": {
+    "2025-07": {
+      "train_rows": 28480,
+      "eval_rows": 1500,
+      "lightgbm_mae": 66.66782006700637,
+      "tabpfn_bagged_mae": 76.13396088700009,
+      "tabpfn_single_mae": 47.75054046649214,
+      "tabm_mae": 63.56681131469602,
+      "old_blend_lgb_bagged_5050_mae": 64.72736974784588,
+      "candidate_single_best_weights": "0.1/0.8/0.1",
+      "candidate_single_best_mae": 46.830032733851965
+    },
+    "2025-08": {
+      "train_rows": 33343,
+      "eval_rows": 1500,
+      "lightgbm_mae": 70.80593855785868,
+      "tabpfn_bagged_mae": 152.32142958277214,
+      "tabpfn_single_mae": 129.91458440194089,
+      "tabm_mae": 45.192833189749926,
+      "old_blend_lgb_bagged_5050_mae": 95.47432715525844,
+      "candidate_single_best_weights": "0.2/0.0/0.8",
+      "candidate_single_best_mae": 43.871336435086306
+    },
+    "2025-09": {
+      "train_rows": 38049,
+      "eval_rows": 1500,
+      "lightgbm_mae": 57.991050717703956,
+      "tabpfn_bagged_mae": 55.190228533450835,
+      "tabpfn_single_mae": 40.491151025931956,
+      "tabm_mae": 53.024465673713905,
+      "old_blend_lgb_bagged_5050_mae": 52.09586968495883,
+      "candidate_single_best_weights": "0.2/0.8/0.0",
+      "candidate_single_best_mae": 39.528890092859804
+    },
+    "2025-10": {
+      "train_rows": 42674,
+      "eval_rows": 1500,
+      "lightgbm_mae": 53.133197724912606,
+      "tabpfn_bagged_mae": 50.965846161675245,
+      "tabpfn_single_mae": 74.43417355541763,
+      "tabm_mae": 67.51061631833478,
+      "old_blend_lgb_bagged_5050_mae": 47.642131285255495,
+      "candidate_single_best_weights": "0.7/0.0/0.3",
+      "candidate_single_best_mae": 47.55026078970713
+    }
+  },
+  "mean_mae_single_top10": {
+    "0.4/0.1/0.5": 51.74065842027656,
+    "0.3/0.1/0.6": 51.83901020735337,
+    "0.3/0.2/0.5": 52.20376580106189,
+    "0.5/0.1/0.4": 52.21758920044273,
+    "0.4/0.0/0.6": 52.23416849557629,
+    "0.5/0.0/0.5": 52.37613874904781,
+    "0.4/0.2/0.4": 52.43367842296665,
+    "0.2/0.1/0.7": 52.56047495710409,
+    "0.2/0.2/0.6": 52.58961739759255,
+    "0.3/0.0/0.7": 52.65200783923794
+  },
+  "mean_mae_selected": {
+    "best_overall_single": {
+      "weights": "0.4/0.1/0.5",
+      "mean_mae": 51.74065842027656
+    },
+    "holdout_winner_0.1/0.5/0.4_single": 56.64285905576065,
+    "old_blend_lgb_bagged_5050": 64.98492446832967,
+    "lightgbm_only": 62.14950176687041,
+    "tabm_only": 57.32368162412365,
+    "tabpfn_single_only": 73.14761236244564
+  }
+}

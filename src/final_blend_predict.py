@@ -1,16 +1,33 @@
-"""Final predictions from the LightGBM + TabPFN v2 blend.
+"""Final predictions from the LightGBM + TabPFN v2 + TabM blend.
 
-The temporal-holdout experiment (src/tabfm_experiment.py) showed a 50/50
-log-space blend of LightGBM and bagged TabPFN v2 improves clean-row MAE by
-~7% over LightGBM alone ($58.75 vs $63.23 on identical rows). This script
-regenerates both deliverables with that blend:
+Recipe selection (see report/tabfm_metrics.json and
+report/rolling_validation.json):
+
+* The Sep-Oct temporal holdout showed single-full-context TabPFN v2 beats
+  the earlier 4x8k bagging by ~$9 MAE, and TabM (parameter-efficient MLP
+  ensemble) beats LightGBM as a single model.
+* Because one window is not enough to pick blend weights, the weights were
+  re-validated rolling-origin across four forward-in-time folds (predict
+  Jul, Aug, Sep, Oct from strictly earlier months). Per-month regimes vary
+  a lot (TabPFN wins Jul/Sep, collapses Aug/Oct), so the selected weights
+  sit on the plateau that minimizes MEAN clean-row MAE across folds:
+
+      0.4 * LightGBM + 0.1 * TabPFN v2 (single context) + 0.5 * TabM
+      (log space; rolling mean $51.74 vs $64.98 for the previous
+       0.5/0.5 LightGBM+bagged-TabPFN blend; Sep-Oct holdout $53.35
+       vs $58.75)
+
+All three components are license-clean for this deliverable (TabPFN v2 is
+Prior Labs' license-free tier; the newer v2.5/v3 checkpoints are gated
+behind a non-commercial license and are deliberately not used here).
+
+This script regenerates both deliverables with that blend:
 
 1. validation_predictions.csv
 2. data/december_chart_inputs.csv (predicted_rate column)
 
-TabPFN inference on CPU is slow, so predictions are computed per
-(bag, chunk) and cached under .tabfm_cache/final/; an interrupted run
-resumes where it stopped. LightGBM predictions are cached too.
+Slow steps cache their log-predictions under .tabfm_cache/final/ so an
+interrupted run resumes. Everything is seeded.
 
 Usage:
   TABPFN_ALLOW_CPU_LARGE_DATASET=1 python src/final_blend_predict.py
@@ -39,12 +56,9 @@ from validate import LGB_PARAMS, align_categories, fit_lgb
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / ".tabfm_cache" / "final"
 SEED = 42
-N_BAGS = 4
-BAG_SIZE = 8000
 N_ESTIMATORS = 2
-CHUNK = 1500
-LGB_WEIGHT = 0.5
-TABPFN_MODEL = os.path.expanduser("~/.cache/tabpfn/tabpfn-v2-regressor.ckpt")
+W_LGB, W_TABPFN, W_TABM = 0.4, 0.1, 0.5
+TABPFN_CKPT = "tabpfn-v2-regressor.ckpt"  # resolved/downloaded by the tabpfn package
 
 
 def tabpfn_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -80,37 +94,50 @@ def lgb_final_log(full_f, target_f, train_test, daily, weight_median) -> np.ndar
 
 
 def tabpfn_final_log(full_f, target_f) -> np.ndarray:
+    """Single context holding the full cleaned training data; one predict
+    call for all targets (each call redoes the context forward, so chunking
+    the queries would multiply the dominant cost)."""
     from tabpfn import TabPFNRegressor
 
-    x_target = tabpfn_frame(target_f)
-    n_chunks = int(np.ceil(len(x_target) / CHUNK))
-    bag_means = []
-    for bag in range(N_BAGS):
-        chunk_files = [CACHE / f"bag{bag}_chunk{i}.npy" for i in range(n_chunks)]
-        missing = [i for i, f in enumerate(chunk_files) if not f.exists()]
-        if missing:
-            rng = np.random.default_rng(SEED + bag)
-            idx = rng.choice(len(full_f), BAG_SIZE, replace=False)
-            ctx = full_f.iloc[idx]
-            model = TabPFNRegressor(
-                model_path=TABPFN_MODEL,
-                device="cpu",
-                n_estimators=N_ESTIMATORS,
-                random_state=SEED + bag,
-                ignore_pretraining_limits=True,
-            )
-            model.fit(tabpfn_frame(ctx), np.log(ctx["posted_rate"].to_numpy()))
-            for i in missing:
-                t0 = time.time()
-                sl = x_target.iloc[i * CHUNK : (i + 1) * CHUNK]
-                np.save(chunk_files[i], model.predict(sl))
-                print(
-                    f"bag {bag + 1}/{N_BAGS} chunk {i + 1}/{n_chunks} "
-                    f"done in {time.time() - t0:.0f}s",
-                    flush=True,
-                )
-        bag_means.append(np.concatenate([np.load(f) for f in chunk_files]))
-    return np.mean(bag_means, axis=0)
+    cache = CACHE / "tabpfn_single_final_log.npy"
+    if cache.exists():
+        print("tabpfn predictions loaded from cache", flush=True)
+        return np.load(cache)
+    model = TabPFNRegressor(
+        model_path=TABPFN_CKPT,
+        device="cpu",
+        n_estimators=N_ESTIMATORS,
+        random_state=SEED,
+        ignore_pretraining_limits=True,
+    )
+    t0 = time.time()
+    model.fit(tabpfn_frame(full_f), np.log(full_f["posted_rate"].to_numpy()))
+    log_pred = model.predict(tabpfn_frame(target_f))
+    np.save(cache, log_pred)
+    print(
+        f"tabpfn single-context ({len(full_f)} rows -> {len(target_f)} targets) "
+        f"done in {time.time() - t0:.0f}s",
+        flush=True,
+    )
+    return log_pred
+
+
+def tabm_final_log(train_f, stop_f, target_f) -> np.ndarray:
+    """Mirrors the rolling-fold protocol: train on everything before the
+    last labeled month, early-stop on that month (TabM has no round count
+    to rescale, so there is no refit-on-all step)."""
+    cache = CACHE / "tabm_final_log.npy"
+    if cache.exists():
+        print("tabm predictions loaded from cache", flush=True)
+        return np.load(cache)
+    from tabm_model import train_tabm
+
+    t0 = time.time()
+    model = train_tabm(train_f, stop_f, seed=SEED)
+    log_pred = model.predict_log(target_f)
+    np.save(cache, log_pred)
+    print(f"tabm done in {time.time() - t0:.0f}s", flush=True)
+    return log_pred
 
 
 def main() -> None:
@@ -120,17 +147,26 @@ def main() -> None:
     daily = daily_market_series([train_test, validation])
     weight_median = train_test["weight"].abs().median()
 
-    full_f = build_features(clean_training_rows(train_test), daily, weight_median)
+    full_clean = clean_training_rows(train_test)
+    full_f = build_features(full_clean, daily, weight_median)
     valid_f = build_features(validation, daily, weight_median)
     december_f = build_features(
         build_december_frame(train_test, validation), daily, weight_median
     )
-    align_categories([full_f, valid_f, december_f])
+    last_month = pd.Timestamp("2025-10-01")
+    tabm_train_f = build_features(
+        full_clean[full_clean["date"] < last_month], daily, weight_median
+    )
+    tabm_stop_f = build_features(
+        full_clean[full_clean["date"] >= last_month], daily, weight_median
+    )
+    align_categories([full_f, valid_f, december_f, tabm_train_f, tabm_stop_f])
     target_f = pd.concat([valid_f, december_f], ignore_index=True)
 
     lgb_log = lgb_final_log(full_f, target_f, train_test, daily, weight_median)
     tab_log = tabpfn_final_log(full_f, target_f)
-    blend = np.exp(LGB_WEIGHT * lgb_log + (1 - LGB_WEIGHT) * tab_log)
+    tabm_log = tabm_final_log(tabm_train_f, tabm_stop_f, target_f)
+    blend = np.exp(W_LGB * lgb_log + W_TABPFN * tab_log + W_TABM * tabm_log)
 
     valid_pred, dec_pred = blend[: len(valid_f)], blend[len(valid_f) :]
 
@@ -151,9 +187,14 @@ def main() -> None:
     )
 
     summary = {
-        "method": "0.5 * LightGBM + 0.5 * bagged TabPFN v2 (log space)",
-        "bags": N_BAGS,
-        "bag_size": BAG_SIZE,
+        "method": (
+            "0.4 * LightGBM + 0.1 * TabPFN v2 (single full context) "
+            "+ 0.5 * TabM (log space)"
+        ),
+        "weights": {"lightgbm": W_LGB, "tabpfn_v2_single": W_TABPFN, "tabm": W_TABM},
+        "selection": "rolling-origin mean clean MAE across Jul-Oct folds "
+        "(report/rolling_validation.json); Sep-Oct holdout $53.35 vs $58.75 "
+        "for the previous LGB+bagged-TabPFN 50/50 blend",
         "validation_mean": float(valid_pred.mean()),
         "december_min": float(dec_pred.min()),
         "december_max": float(dec_pred.max()),

@@ -1,4 +1,10 @@
-# Optional: tabular foundation model experiments (src/tabfm_experiment.py).
-# Not needed for the main pipeline (src/validate.py, src/train_predict.py).
+# Optional: model-comparison and blend experiments
+# (src/tabfm_experiment.py, src/rolling_validate.py, src/final_blend_predict.py).
+# Not needed for the LightGBM-only pipeline (src/validate.py, src/train_predict.py).
 tabpfn>=8,<9
 tabicl>=2.1,<3
+# TabM (parameter-efficient MLP ensemble) + its numeric-embedding dependency;
+# trained locally, no pretrained checkpoint to download.
+tabm>=0.0.3,<0.1
+rtdl_num_embeddings>=0.0.12,<0.1
+torch>=2.0
